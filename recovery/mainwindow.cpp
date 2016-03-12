@@ -49,6 +49,8 @@
 #include <QWSServer>
 #endif
 
+extern QStringList downloadRepoUrls;
+
 /* Main window
  *
  * Initial author: Floris Bos
@@ -991,9 +993,8 @@ void MainWindow::downloadList(const QString &urlstring)
 void MainWindow::downloadLists()
 {
     _numIconsToDownload = 0;
-    QStringList urls = QString(DEFAULT_REPO_SERVER).split(' ', QString::SkipEmptyParts);
 
-    foreach (QString url, urls)
+    foreach (QString url, downloadRepoUrls)
     {
         downloadList(url);
     }

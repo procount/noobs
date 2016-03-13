@@ -91,10 +91,10 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
     RightButtonFilter rbf;
     LongPressHandler lph;
-    GpioInput gpio(gpioChannel);
+    GpioInput *gpio = NULL;
 
     bool runinstaller = false;
-    bool gpio_trigger = false;
+
     bool keyboard_trigger = true;
     bool force_trigger = false;
 
@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
             runinstaller = true;
         // Enables use of GPIO 3 to force NOOBS to launch by pulling low
         else if (strcmp(argv[i], "-gpiotriggerenable") == 0)
-            gpio_trigger = true;
+            gpio = new GpioInput(gpioChannel);
         // Disables use of keyboard to trigger recovery GUI
         else if (strcmp(argv[i], "-keyboardtriggerdisable") == 0)
             keyboard_trigger = false;
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
     // or no OS is installed (/settings/installed_os.json does not exist)
     bool bailout = !runinstaller
         && !force_trigger
-        && !(gpio_trigger && (gpio.value() == 0 ))
+        && !(gpio && (gpio->value() == 0 ))
         && hasInstalledOS();
 
     if (bailout && keyboard_trigger)

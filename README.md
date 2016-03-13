@@ -1,3 +1,4 @@
+
 # NOOBS (New Out of Box Software)
 #### An easy Operating System installer for the Raspberry Pi
 
@@ -97,6 +98,18 @@ Even if you are using your Pi without a display, you can still use NOOBS to easi
 3. Edit the `recovery.cmdline` file in the root NOOBS directory and append `silentinstall` to the arguments list.
 
 When you now boot your Pi using an SD card containing the modified version of NOOBS that you just created, it will automatically install the OS you chose and boot into it after the installation has finished.
+
+### Installation Progress
+
+During the installation of the operating systems, NOOBS will write the percentage completed to a text
+file called /tmp/progress. The format of this file is an integer (0-100) followed by a space, 
+a '%' symbol and a line feed. It is updated only when the progress changes by at least 1%. 
+Sometimes NOOBS will not know the maximum size, so in this case it shows the amount data written in MBs.
+This feature mimics the progress dialog on the display and is useful in headless installations.
+
+To make use of this feature a background shell script can be used. If a /background.sh script 
+exists, it will be executed in the background whilst NOOBS runs. This can be used to read the 
+/tmp/progress file and display the progress on the serial port, or a GPIO display etc.
 
 ### How to create a custom OS version
 

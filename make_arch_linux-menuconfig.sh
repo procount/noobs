@@ -53,4 +53,5 @@ fi
 
 # Run specific command
 make "$MAKECMD"
+make linux-update-defconfig
 

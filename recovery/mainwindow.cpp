@@ -10,6 +10,7 @@
 #include "util.h"
 #include "twoiconsdelegate.h"
 #include "wifisettingsdialog.h"
+#include "passwd.h"
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QMap>
@@ -49,6 +50,8 @@
 #include <QWSServer>
 #endif
 
+#define KHDBG 0
+
 /* Main window
  *
  * Initial author: Floris Bos
@@ -84,7 +87,8 @@ MainWindow::MainWindow(const QString &defaultDisplay, QSplashScreen *splash, QWi
         << 0x01000014 << 0x01000012 << 0x01000014 << 0x42 << 0x41;
     ui->list->setItemDelegate(new TwoIconsDelegate(this));
     ui->list->installEventFilter(this);
-    ui->advToolBar->setVisible(false);
+    ui->advToolBar->setVisible(true);
+    ui->toolBar->setVisible(false);
 
     QRect s = QApplication::desktop()->screenGeometry();
     if (s.height() < 500)
@@ -133,6 +137,8 @@ MainWindow::MainWindow(const QString &defaultDisplay, QSplashScreen *splash, QWi
     _qpd->setWindowFlags(Qt::Window | Qt::CustomizeWindowHint | Qt::WindowTitleHint);
     _qpd->show();
     QApplication::processEvents();
+
+    ui->list->clear();
 
     if (QProcess::execute("mount -t ext4 " SETTINGS_PARTITION " /settings") != 0)
     {
@@ -247,12 +253,21 @@ void MainWindow::populate()
 
     bool osInstalled = QFile::exists(FAT_PARTITION_OF_IMAGE);
     ui->actionCancel->setEnabled(osInstalled);
+
+#ifdef KHDBG
+    qDebug() <<"End of Populate: ";
+    for (int i=0; i < ui->list->count(); i++)
+    {
+        QVariantMap m = ui->list->item(i)->data(Qt::UserRole).toMap();
+        qDebug() << "Repopulate: " << m << "\n";
+    }
+#endif
+
 }
 
 void MainWindow::repopulate()
 {
     QMap<QString,QVariantMap> images = listImages();
-    ui->list->clear();
     bool haveicons = false;
     QSize currentsize = ui->list->iconSize();
     QIcon localIcon(":/icons/hdd.png");
@@ -313,6 +328,9 @@ void MainWindow::repopulate()
         }
         QListWidgetItem *item = new QListWidgetItem(icon, friendlyname);
         item->setData(Qt::UserRole, m);
+#ifdef KHDBG
+        qDebug() << "Repopulate: " << m << "\n";
+#endif
         if (installed)
         {
             item->setData(Qt::BackgroundColorRole, INSTALLED_OS_BACKGROUND_COLOR);
@@ -481,6 +499,8 @@ QMap<QString, QVariantMap> MainWindow::listImages()
             if (images.contains(name))
             {
                 images[name]["partitions"] = m["partitions"];
+                images[name]["username"] = m["username"];
+                images[name]["password"] = m["password"];
             }
             else
             {
@@ -626,6 +646,10 @@ void MainWindow::on_list_currentRowChanged()
 {
     QListWidgetItem *item = ui->list->currentItem();
     ui->actionEdit_config->setEnabled(item && item->data(Qt::UserRole).toMap().contains("partitions"));
+    ui->actionPassword->setEnabled(item && item->data(Qt::UserRole).toMap().contains("partitions"));
+
+    QVariantMap m = item->data(Qt::UserRole).toMap();
+    qDebug() << "RowChanged: " << m;
 }
 
 void MainWindow::update_window_title()
@@ -820,7 +844,16 @@ void MainWindow::inputSequence()
 
 void MainWindow::on_actionAdvanced_triggered(bool checked)
 {
-    ui->advToolBar->setVisible(checked);
+    if (ui->actionAdvanced->isChecked())
+    {
+        ui->toolBar->setVisible(true);
+        ui->mainToolBar->setVisible(false);
+    }
+    else
+    {
+        ui->toolBar->setVisible(false);
+        ui->mainToolBar->setVisible(true);
+    }
 }
 
 void MainWindow::on_actionEdit_config_triggered()
@@ -842,6 +875,14 @@ void MainWindow::on_actionEdit_config_triggered()
 
 void MainWindow::on_actionBrowser_triggered()
 {
+#if KHDBG
+    for (int i=0; i<ui->list->count(); i++)
+    {
+        QListWidgetItem *item = ui->list->item(i);
+        QVariantMap m = item->data(Qt::UserRole).toMap();
+        qDebug() << m;
+    }
+#endif
     startBrowser();
 }
 
@@ -1195,6 +1236,10 @@ void MainWindow::processJsonOs(const QString &name, QVariantMap &new_details, QS
         else
             ui->list->addItem(witem);
     }
+#ifdef KHDBG
+        qDebug() << "ProcessJsonOS: " << new_details << "\n";
+#endif
+
 }
 
 void MainWindow::downloadIcon(const QString &urlstring, const QString &originalurl)
@@ -1561,4 +1606,38 @@ void MainWindow::on_actionWifi_triggered()
             downloadLists();
         }
     }
+}
+
+void MainWindow::on_actionAdvanced_triggered()
+{
+    if (ui->actionAdvanced->isChecked())
+    {
+        ui->toolBar->setVisible(true);
+        ui->mainToolBar->setVisible(false);
+    }
+    else
+    {
+        ui->toolBar->setVisible(false);
+        ui->mainToolBar->setVisible(true);
+    }
+}
+
+void MainWindow::on_actionPassword_triggered()
+{
+    /* If no installed OS is selected, default to first extended partition */
+    QListWidgetItem *item = ui->list->currentItem();
+    QVariantMap m;
+
+    if (item)
+    {
+        m = item->data(Qt::UserRole).toMap();
+        qDebug() << "Passwd triggered: " << m;
+        if (m.contains("partitions"))
+        {
+            //QVariantList l = item->data(Qt::UserRole).toMap().value("partitions").toList();
+            Passwd pDlg(m);
+            pDlg.exec();
+        }
+    }
+
 }

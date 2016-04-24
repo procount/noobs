@@ -36,13 +36,15 @@
  *
  */
 
+bool dsi=false;
+
 void reboot_to_extended(const QString &defaultPartition, bool setDisplayMode)
 {
 #ifdef Q_WS_QWS
     QWSServer::setBackground(Qt::white);
     QWSServer::setCursorVisible(true);
 #endif
-    BootSelectionDialog bsd(defaultPartition);
+    BootSelectionDialog bsd(defaultPartition,dsi);
     if (setDisplayMode)
         bsd.setDisplayMode();
     bsd.exec();
@@ -54,6 +56,7 @@ void reboot_to_extended(const QString &defaultPartition, bool setDisplayMode)
     ::sync();
     // Reboot
     ::reboot(RB_AUTOBOOT);
+
 }
 
 bool hasInstalledOS()
@@ -118,6 +121,9 @@ int main(int argc, char *argv[])
         // Forces display of recovery GUI every time
         else if (strcmp(argv[i], "-forcetrigger") == 0)
             force_trigger = true;
+        // Force dsi switching
+        else if (strcmp(argv[i], "-dsi")==0)
+            dsi = true;
         // Allow default language to be specified in commandline
         else if (strcmp(argv[i], "-lang") == 0)
         {

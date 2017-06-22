@@ -28,6 +28,8 @@ ProgressSlideshowDialog::ProgressSlideshowDialog(const QStringList &slidesDirect
     ui->setupUi(this);
     setLabelText(statusMsg);
 
+    ui->imagespace->setScaledContents(true); //Scale all slides to be the same size
+
     QRect s = QApplication::desktop()->screenGeometry();
     if (s.height() < 400)
         setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
@@ -59,11 +61,23 @@ ProgressSlideshowDialog::ProgressSlideshowDialog(const QStringList &slidesDirect
     }
     else
     {
-        /* Resize window to size of first image in slide directory */
-        QPixmap pixmap(_slides.first());
-        ui->imagespace->setMinimumSize(pixmap.width(), pixmap.height());
-        resize(pixmap.width(), pixmap.height()+50);
+        /* Resize window to size of largest image in slide directory */
+        int maxwidth=0;
+        int maxheight=0;
+        foreach (QString slide, _slides)
+        {   //Get largest slide dimension
+            QPixmap pix(slide);
+            maxwidth = qMax(maxwidth, pix.width());
+            maxheight = qMax(maxheight, pix.height());
+        }
+        //Ensure it is smaller than physical screen
+        maxwidth = qMin(maxwidth, s.width()-10);
+        maxheight = qMin(maxheight, s.height()-100);
+        //Resize slide placeholder and dialog box
+        ui->imagespace->setMinimumSize(maxwidth, maxheight);
+        resize(maxwidth, maxheight+50);
 
+        QPixmap pixmap(_slides.first());
         ui->imagespace->setPixmap(pixmap);
 
         connect(&_timer, SIGNAL(timeout()), this, SLOT(nextSlide()));

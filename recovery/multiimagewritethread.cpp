@@ -605,6 +605,11 @@ bool MultiImageWriteThread::processImage(OsInfo *image)
             pnr++;
         }
 
+        //If this is a backup, there maybe things in the partition_setup we don't want to repeat
+        //So set "restore=true"
+        if ( os_name.contains("#"))
+            env.insert("restore", "true");
+
         qDebug() << "Executing: sh" << args;
         qDebug() << "Env:" << env.toStringList();
         proc.setProcessChannelMode(proc.MergedChannels);

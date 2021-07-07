@@ -10,7 +10,7 @@
 #include "bootselectiondialog.h"
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/reboot.h>
+#include <sys/syscall.h>
 #include <linux/reboot.h>
 #include <QApplication>
 #include <QStyle>
@@ -36,13 +36,14 @@
  *
  */
 
-void reboot_to_extended(const QString &defaultPartition, bool setDisplayMode)
+void showBootMenu(const QString &drive, const QString &defaultPartition, bool setDisplayMode)
 {
+    QByteArray reboot_part;
 #ifdef Q_WS_QWS
-    QWSServer::setBackground(Qt::white);
+    QWSServer::setBackground(BACKGROUND_COLOR);
     QWSServer::setCursorVisible(true);
 #endif
-    BootSelectionDialog bsd(defaultPartition);
+    BootSelectionDialog bsd(drive, defaultPartition);
     if (setDisplayMode)
         bsd.setDisplayMode();
     bsd.exec();
@@ -53,14 +54,15 @@ void reboot_to_extended(const QString &defaultPartition, bool setDisplayMode)
     QProcess::execute("umount -ar");
     ::sync();
     // Reboot
-    ::reboot(RB_AUTOBOOT);
+    reboot_part = getFileContents("/run/reboot_part").trimmed();
+    ::syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, reboot_part.constData());
 }
 
-bool hasInstalledOS()
+bool hasInstalledOS(const QString &drive)
 {
     bool installedOsFileExists = false;
 
-    if (QProcess::execute("mount -o ro " SETTINGS_PARTITION " /settings") == 0)
+    if (QProcess::execute("mount -o ro "+partdev(drive, SETTINGS_PARTNR)+" /settings") == 0)
     {
         installedOsFileExists = QFile::exists("/settings/installed_os.json");
         QProcess::execute("umount /settings");
@@ -69,9 +71,69 @@ bool hasInstalledOS()
     return installedOsFileExists;
 }
 
+QString findRecoveryDrive()
+{
+    /* Search for drive with recovery.rfs */
+    QString drive;
+    QString dirname  = "/sys/class/block";
+    QDir    dir(dirname);
+    QStringList list = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+
+    foreach (QString devname, list)
+    {
+        if (QFile::symLinkTarget("/sys/class/block/"+devname).contains("/devices/virtual/") )
+        {   //Skip if partition is virtual.
+            continue;
+        }
+
+        int partitionNr = 0;
+        QRegExp partnrRx("([0-9]+)$");
+        if (partnrRx.indexIn(devname) != -1)
+        {   //Does devname end in 1 or more digits? Yes->Read it
+            partitionNr = partnrRx.cap(1).toInt();
+
+            if (partitionNr>1)
+            {   //Skip if partition Number >1
+                continue;
+            }
+        }
+
+        if (partitionNr == 0)
+        {   //Check for a possible non-MBR drive
+            if ( list.contains(devname+"1") || list.contains(devname+"p1") )
+            {
+                //skip if partition 1 exists (must have MBR)
+                continue;
+            }
+        }
+
+        if (QProcess::execute("mount -t vfat -o ro /dev/"+devname+" /mnt") == 0)
+        {
+
+            if (QFile::exists("/mnt/recovery.rfs"))
+            {
+                qDebug() << "Found recovery.rfs at" << devname;
+
+                // We are interested in the drive, not the exact partition
+                drive = "/dev/"+devname;
+                if (drive.endsWith("p1"))
+                    drive.chop(2);
+                else if (drive.endsWith("1"))
+                    drive.chop(1);
+            }
+
+            QProcess::execute("umount /mnt");
+        }
+
+        if (!drive.isEmpty())
+            break;
+    }
+    return(drive);
+}
+
 int main(int argc, char *argv[])
 {
-    bool hasTouchScreen = QFile::exists("/sys/devices/platform/rpi_ft5406");
+    bool hasTouchScreen = QFile::exists("/proc/device-tree/soc/firmware/touchscreen");
 
     // Unless we have a touch screen, wait for keyboard to appear before displaying anything
     if (!hasTouchScreen)
@@ -163,22 +225,57 @@ int main(int argc, char *argv[])
         a.setWindowIcon(QIcon(":/icons/raspberry_icon.png"));
 
 #ifdef Q_WS_QWS
-        QWSServer::setBackground(BACKGROUND_COLOR);
+    QWSServer::setBackground(BACKGROUND_COLOR);
 #endif
-        QSplashScreen *splash = new QSplashScreen(QPixmap(":/wallpaper.png"));
-        splash->show();
-        QApplication::processEvents();
+    QSplashScreen *splash = new QSplashScreen(QPixmap(":/wallpaper.png"));
+    splash->show();
+    QApplication::processEvents();
+
+    // Wait for drive device to show up
+    QString drive;
+    bool driveReady = false;
+    QTime t;
+    t.start();
+
+    while (t.elapsed() < 10000)
+    {
+        if (drive.isEmpty())
+        {
+            /* We do not know the exact drive name to wait for */
+            drive = findRecoveryDrive();
+            if (!drive.isEmpty())
+            {
+                driveReady = true;
+                break;
+            }
+        }
+        else if (drive.startsWith("/dev"))
+        {
+            if (QFile::exists(drive))
+            {
+                driveReady = true;
+                break;
+            }
+        }
+
+        QApplication::processEvents(QEventLoop::WaitForMoreEvents, 100);
+    }
+    if (!driveReady)
+    {
+        QMessageBox::critical(NULL, "Files not found", QString("Cannot find the drive with NOOBS files %1").arg(drive), QMessageBox::Close);
+        return 1;
+    }
+    qDebug() << "NOOBS drive:" << drive;
 
     // If -runinstaller is not specified, only continue if SHIFT is pressed, GPIO is triggered,
     // or no OS is installed (/settings/installed_os.json does not exist)
     bool bailout = !runinstaller
         && !force_trigger
         && !(gpio_trigger && (gpio.value() == 0 ))
-        && hasInstalledOS();
+        && hasInstalledOS(drive);
 
     if (bailout && keyboard_trigger)
     {
-        QTime t;
         t.start();
 
         while (t.elapsed() < 2000)
@@ -202,7 +299,7 @@ int main(int argc, char *argv[])
     if (bailout)
     {
         splash->hide();
-        reboot_to_extended(defaultPartition, true);
+        showBootMenu(drive, defaultPartition, true);
     }
 
 #ifdef Q_WS_QWS
@@ -210,7 +307,7 @@ int main(int argc, char *argv[])
 #endif
 
     // Main window in the middle of screen
-    MainWindow mw(defaultDisplay, splash);
+    MainWindow mw(drive, defaultDisplay, splash);
     mw.setGeometry(QStyle::alignedRect(Qt::LeftToRight, Qt::AlignCenter, mw.size(), a.desktop()->availableGeometry()));
     mw.show();
 
@@ -222,7 +319,7 @@ int main(int argc, char *argv[])
 #endif
 
     a.exec();
-    reboot_to_extended(defaultPartition, false);
+    showBootMenu(drive, defaultPartition, false);
 
     return 0;
 }

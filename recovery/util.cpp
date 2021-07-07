@@ -1,4 +1,5 @@
 #include "util.h"
+#include "mbr.h"
 #include <sys/ioctl.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -10,6 +11,7 @@
 #include <QProcess>
 #include <QDebug>
 #include <QList>
+#include <QtEndian>
 
 /*
  * Convenience functions
@@ -37,6 +39,17 @@ void putFileContents(const QString &filename, const QByteArray &data)
     f.open(f.WriteOnly);
     f.write(data);
     f.close();
+}
+
+bool backupFile(const QString &filename, const QString &ext)
+{
+    QString backupName = filename + "." + ext;
+
+    if (QFile::exists(backupName))
+    {
+        QFile::remove(backupName);
+    }
+    return  QFile::rename(filename,backupName);
 }
 
 /* Utility function to query current overscan setting */
@@ -140,17 +153,95 @@ bool canBootOs(const QString& name, const QVariantMap& values)
     return true;
 }
 
-bool setRebootPartition(QByteArray partition)
+void setRebootPartition(QByteArray partition)
 {
-    if (QFileInfo("/sys/module/bcm2708/parameters/reboot_part").exists())
+    putFileContents("/run/reboot_part", partition+"\n");
+}
+
+/* Returns device name for drive and partition number
+ *
+ * partdev("mmcblk0",1) -> mmcblk0p1
+ * partdev("sda",2) -> sda2
+ */
+QByteArray partdev(const QString &drivedev, int nr)
+{
+    if (drivedev.right(1).at(0).isDigit())
+        return drivedev.toAscii()+"p"+QByteArray::number(nr);
+    else
+        return drivedev.toAscii()+QByteArray::number(nr);
+}
+
+/* Returns /sys/class/block path for given drive and optional partition number */
+QByteArray sysclassblock(const QString &drivedev, int partnr)
+{
+    QByteArray b;
+
+    if (partnr == -1)
+        b = drivedev.toAscii();
+    else
+        b = partdev(drivedev, partnr);
+
+    if (b.startsWith("/dev/"))
+        b = b.mid(5);
+
+    return "/sys/class/block/"+ b;
+}
+
+QByteArray getLabel(const QString part)
+{
+    QByteArray result;
+    QProcess p;
+    p.start("/sbin/blkid -s LABEL -o value "+part);
+    p.waitForFinished();
+
+    if (p.exitCode() == 0)
+        result = p.readAll().trimmed();
+
+    return result;
+}
+
+QByteArray getUUID(const QString part)
+{
+    QByteArray result;
+    QProcess p;
+    p.start("/sbin/blkid -s UUID -o value "+part);
+    p.waitForFinished();
+
+    if (p.exitCode() == 0)
+        result = p.readAll().trimmed();
+
+    return result;
+}
+
+QByteArray getDiskId(const QString &device)
+{
+    mbr_table mbr;
+
+    QFile f(device);
+    f.open(f.ReadOnly);
+    f.read((char *) &mbr, sizeof(mbr));
+    f.close();
+
+    quint32 diskid = qFromLittleEndian<quint32>(mbr.diskid);
+    return QByteArray::number(diskid, 16).rightJustified(8, '0');;
+}
+
+QByteArray getPartUUID(const QString &devpart)
+{
+    QByteArray r;
+
+    QRegExp partnrRx("([0-9]+)$");
+    if (partnrRx.indexIn(devpart) != -1)
     {
-        putFileContents("/sys/module/bcm2708/parameters/reboot_part", partition+"\n");
-        return true;
+        QString drive = devpart.left(partnrRx.pos());
+        if (drive.endsWith("p"))
+            drive.chop(1);
+
+        r = "PARTUUID="+getDiskId(drive);
+        int partnr = partnrRx.cap(1).toInt();
+        QByteArray partnrstr = QByteArray::number(partnr, 16).rightJustified(2, '0');
+        r += '-'+partnrstr;
     }
-    else if (QFileInfo("/sys/module/bcm2709/parameters/reboot_part").exists())
-    {
-        putFileContents("/sys/module/bcm2709/parameters/reboot_part", partition+"\n");
-        return true;
-    }
-    return false;
+
+    return r;
 }

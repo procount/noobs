@@ -3,7 +3,7 @@
 
 NOOBS is designed to make it easy to select and install operating systems for the Raspberry Pi without having to worry about manually imaging your SD card.
 
-The latest official release of NOOBS can be downloaded from http://downloads.raspberrypi.org/NOOBS_latest
+The latest official release of NOOBS can be downloaded from https://downloads.raspberrypi.org/NOOBS_latest
 
 For information on previous releases and version changelists, visit https://github.com/raspberrypi/noobs/releases
 
@@ -12,7 +12,7 @@ For information on previous releases and version changelists, visit https://gith
 <sup>*NOTE: The list of OSes in this image is indicative only. It will vary according to your Raspberry Pi model and the availability of OSes on our remote download repository.</sup>
 
 ### About
-On first boot NOOBS will format your SD card and allow you to select which OSes you want to install from a list. This OS list is automatically generated from both locally available OSes (i.e. those contained in the `/os` directory on disk) or those available from our remote repository (network connection required).
+On first boot NOOBS will repartition your SD card and allow you to select which OSes you want to install from a list. This OS list is automatically generated from both locally available OSes (i.e. those contained in the `/os` directory on disk) or those available from our remote repository (network connection required).
 
 Only the latest version of each OS will ever be displayed meaning that you can be sure that you have installed the most up-to-date release of your selected OS.
 
@@ -21,7 +21,7 @@ On any subsequent boot you can then press the SHIFT key to enter the NOOBS inter
 The NOOBS interface provides the following functionality:
 - <b>Install</b>: Installs the selected OSes onto your SD card. Changing this selection erases all OSes currently installed.
 - <b>Edit Config</b>: Opens a text editor allowing the cmdline and config for the selected installed OS to be edited.
-- <b>Online Help</b>: [Networking Required] Open a browser that displays the Raspberry Pi Help page ( http://www.raspberrypi.org/help/ ), allowing people to quickly access help and troubleshooting.
+- <b>Online Help</b>: [Networking Required] Open a browser that displays the Raspberry Pi Help page ( https://www.raspberrypi.org/help/ ), allowing people to quickly access help and troubleshooting.
 - <b>Exit</b>: Quits NOOBS and reboots the Pi into the OS boot menu.
 - <b>Language Selection</b>: Allows you to select the language to be displayed.
 - <b>Keyboard Layout Selection</b>: Allows you to select the keyboard layout to be used.
@@ -30,39 +30,46 @@ The NOOBS interface provides the following functionality:
 Note that all user settings (language, keyboard layout, display mode) will persist between reboots and will also be automatically passed to the installed OSes. This means that if you can see the NOOBS interface on your display device then you should be able to see the OS CLI/GUI when it boots too!
 ### Setup
 
+**Raspberry Pi 4 Model B:** display must be connected to HDMI port closest to power jack.
+
 To set up a blank SD card with NOOBS:
-- Format an SD card that is 8GB or greater in size as FAT32 (see instructions on how to do this below)
-- Download and extract the files from the NOOBS zip file. (Windows built-in zip features may have trouble with this file. If so, use another program such as 7zip.)
-- Copy the extracted files onto the SD card that you just formatted so that this file is at the root directory of the SD card.
-<b> Please note that in some cases it may extract the files into a folder, if this is the case then please copy across the files from inside the folder rather than the folder itself.</b>
+- Format an SD card as FAT. See the instructions given below.
+  - Your SD card will need to be at least 16GB for Raspberry Pi OS Full, or at least 8GB for all other installs.
+  - Consider using NOOBS-Lite with an internet connection if you want to leave more space for operating systems.
+- Download and extract the files from the NOOBS zip file. (Windows built-in zip features may have trouble with this file. If so, use another program such as [7zip](https://www.7-zip.org/).)
+- Copy the extracted files onto the SD card that you just formatted so that these files are at the root directory of the SD card. Please note that in some cases it may extract the files into a folder; if this is the case, then please copy across the files from inside the folder rather than the folder itself.  
 
 On first boot the "RECOVERY" FAT partition will be automatically resized to a minimum and a list of OSes that are available to install will be displayed.
 
 ### Operating System Choice
 
 NOOBS is available in 2 formats:
-- `NOOBS Full` includes the installation files for Raspbian only.
+- `NOOBS Full` includes the installation files for Raspberry Pi OS Full and LibreELEC only.
 - `NOOBS-Lite` does not include any Operating Systems at all.
+
+Please note that RISC OS cannot be installed by the NOOBS Full version due to the amount of space taken up by the included Operating Systems.
+
+If you want to install RISC OS, use NOOBS-Lite instead, or change the included operating systems.
 
 #### OS Network Download
 
-Both versions of NOOBS allow additional Operating Systems to be downloaded from our remote repository. To do this, the Raspberry Pi must be connected to a wired network, or it can connect over Wifi using the [Raspberry Pi USB wifi dongle](https://www.raspberrypi.org/products/usb-wifi-dongle/) or the Raspberry Pi 3 Model B built-in wifi. 
+Both versions of NOOBS allow additional Operating Systems to be downloaded from our remote repository. To do this, the Raspberry Pi must be connected to a wired network, or it can connect over Wifi using the [Raspberry Pi USB wifi dongle](https://www.raspberrypi.org/products/raspberry-pi-usb-wifi-dongle/) or the Raspberry Pi 3 Model B built-in wifi. 
 
 Once connected, the Pi will only show a list of Operating Systems that are appropriate to your Pi Model. If you want to see ALL available OSes, edit the `recovery.cmdline` file in the root NOOBS directory and append `showall` to the arguments list.
 
-####Wired Networks
+#### Wired Networks
 
 If a wired ethernet cable is plugged into the Pi before NOOBS starts, NOOBS will connect via DHCP to our remote download repository and present a list of available Operating Systems that are available for installation.
 
 #### Wifi Networks
 
-If you have the official [Raspberry Pi USB wifi Dongle](https://www.raspberrypi.org/products/usb-wifi-dongle/), or are using the Raspberry Pi 3 Model B with built-in wifi, the wifi icon on the NOOBS toolbar will be available. Click on this to select your Wifi SSID network and enter the wifi password. 
+If you have the official [Raspberry Pi USB wifi Dongle](https://www.raspberrypi.org/products/raspberry-pi-usb-wifi-dongle/), or are using the Raspberry Pi 3 Model B with built-in wifi, the wifi icon on the NOOBS toolbar will be available. Click on this to select your Wifi SSID network and enter the wifi password. 
 
 ![alt text](screenshots/wifi_selector.png "Select your wifi network and enter the password")
 
 ### How to Format an SD card as FAT
 
-For <b>Windows</b> users, we recommend formatting your SD card using the SD Association's Formatting Tool, which can be downloaded from https://www.sdcard.org/downloads/formatter_4/ You will need to set "FORMAT SIZE ADJUSTMENT" option to "ON" in the "Options" menu to ensure that the entire SD card volume is formatted - not just a single partition. For more detailed and beginner-friendly formatting instructions, please refer to http://www.raspberrypi.org/quick-start-guide
+For <b>Windows</b> users, we recommend formatting your SD card using the SD Association's Formatting Tool, which can be downloaded from https://www.sdcard.org/downloads/formatter_4/ You will need to set "FORMAT SIZE ADJUSTMENT" option to "ON" in the "Options" menu to ensure that the entire SD card volume is formatted - not just a single partition. With the latest SD Association Formatting Tool (V5.0) that option has been removed and is now the default. For more detailed and beginner-friendly formatting instructions, please refer to https://www.raspberrypi.org/quick-start-guide
 
 The SD Association's Formatting Tool is also available for <b>Mac</b> users although the default OSX Disk Utility is also capable of formatting the entire disk (select the SD card volume and choose "Erase" with "MS-DOS" format).
 
@@ -137,7 +144,7 @@ There are two main use cases for which you may want to create a custom version o
 
 The following steps allow you to create a modified copy of one of the standard OS releases that contains your custom files, packages and settings.
 
-1. Download a base version of NOOBS from http://downloads.raspberrypi.org/NOOBS_latest
+1. Download a base version of NOOBS from https://downloads.raspberrypi.org/NOOBS_latest
 
 2. Extract the NOOBS zipfile
 
@@ -158,8 +165,8 @@ The following steps allow you to create a modified copy of one of the standard O
   2. "uncompressed_tarball_size" - replace the numerical value with the size of your filesystem tarballs when uncompressed
 
 9. Replace the `.tar.xz` root and boot filesystem tarballs with copies created from your custom OS version (these instructions assume you're only using a single OS at a time with NOOBS - they won't work if you're running multiple OSes from a single SD card). The name of these tarballs needs to match the labels given in `partitions.json`.
-  1. To create the root tarball you will need to run `tar -cvpf <label>.tar /* --exclude=proc/* --exclude=sys/* --exclude=dev/pts/*` from within the root filesystem of your custom OS version. You should then compress the resulting tarball with `xz -9 -e <label>.tar`.
-  2. To create the boot tarball you will need to run `tar -cvpf <label>.tar .` at the root directory of the boot partition of your custom OS version. You should then compress the resulting tarball with `xz -9 -e <label>.tar`.
+  1. To create the root tarball you will need to run `bsdtar --numeric-owner --format gnutar --one-file-system -cpf <label>.tar .` from within the root filesystem of your custom OS version. You should then compress the resulting tarball with `xz -9 -e <label>.tar`.
+  2. To create the boot tarball you will need to run `bsdtar --numeric-owner --format gnutar -cpf <label>.tar .` at the root directory of the boot partition of your custom OS version. You should then compress the resulting tarball with `xz -9 -e <label>.tar`.
 
 ### How to change the default Language, Keyboard layout, Display mode or Boot Partition etc.
 
@@ -249,7 +256,7 @@ Note that this will require a minimum of 6GB free disk space.
 
 On Ubuntu:
 
-`sudo apt-get install build-essential rsync texinfo libncurses-dev whois unzip bc qt4-linguist-tools`
+`sudo apt install build-essential rsync texinfo libncurses-dev whois unzip bc qt4-linguist-tools`
 
 #### Run Build Script
 
@@ -269,7 +276,7 @@ If your build machine also has some QT5 components, it is useful to `export QT_S
 ## How to run your Build
 
 In order to setup an SD card with a newly built version of NOOBS, you will need to:
-- Format an SD card that is 8GB or greater in size as FAT32
+- Format an SD card that is 16GB or greater in size as FAT32
 - Replace the `/os` directory in `/output` with the copy contained in the release version of NOOBS (see above for download links)
 - Copy the files in the `/output` directory onto the SD card
 
@@ -310,9 +317,9 @@ so that the project also compiles and can be tested under standard Qt.
 
 References:
 
-http://qt-project.org/doc/qt-4.8/i18n-source-translation.html
+https://qt-project.org/doc/qt-4.8/i18n-source-translation.html
 
-http://qt-project.org/doc/qt-4.8/linguist-manual.html
+https://qt-project.org/doc/qt-4.8/linguist-manual.html
 
 To set up a git pre-commit hook to automatically update the translation files, run the following commands in the project root:
 - `chmod +x pre-commit-translation-update-hook.sh`
@@ -347,9 +354,9 @@ Recovery software directly links to:
 - Qt libraries, available under LGPL and commercial license.
 
 Currently used icon sets:
-- http://www.fatcow.com/free-icons - Creative commons Attribution license
+- https://www.fatcow.com/free-icons - Creative commons Attribution license
 - http://www.famfamfam.com/lab/icons/flags - "These flag icons are available for free use for any purpose with no requirement for attribution."
 - http://www.oxygen-icons.org/ - Available under Creative Common Attribution-ShareAlike 3.0 and LGPL license
 
-Licenses of utility software build by buildroot:
+Licenses of utility software built by buildroot:
 Type `cd buildroot ; make legal-info` to generate a list, which will be available under `output/legal-info`.

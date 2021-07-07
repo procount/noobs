@@ -19,10 +19,11 @@
 #include <sys/ioctl.h>
 #include <QtEndian>
 
-MultiImageWriteThread::MultiImageWriteThread(QObject *parent) :
-    QThread(parent), _extraSpacePerPartition(0), _part(5)
+MultiImageWriteThread::MultiImageWriteThread(const QString &bootdrive, const QString &rootdrive, QObject *parent) :
+    QThread(parent), _drive(rootdrive), _bootdrive(bootdrive), _extraSpacePerPartition(0), _part(5)
 {
     QDir dir;
+    _multiDrives = (bootdrive != rootdrive);
 
     if (!dir.exists("/mnt2"))
         dir.mkdir("/mnt2");
@@ -37,14 +38,14 @@ void MultiImageWriteThread::addImage(const QString &folder, const QString &flavo
 void MultiImageWriteThread::run()
 {
     /* Calculate space requirements, and check special requirements */
-    int totalnominalsize = 0, totaluncompressedsize = 0, numparts = 0, numexpandparts = 0;
-    int startSector = getFileContents("/sys/class/block/mmcblk0p5/start").trimmed().toULongLong()
-                    + getFileContents("/sys/class/block/mmcblk0p5/size").trimmed().toULongLong();
-    int totalSectors = getFileContents("/sys/class/block/mmcblk0/size").trimmed().toULongLong();
-    int availableMB = (totalSectors-startSector)/2048;
+    uint totalnominalsize = 0, totaluncompressedsize = 0, numparts = 0, numexpandparts = 0;
+    uint startSector = getFileContents(sysclassblock(_drive, 5)+"/start").trimmed().toUInt()
+                    + getFileContents(sysclassblock(_drive, 5)+"/size").trimmed().toUInt();
+    uint totalSectors = getFileContents(sysclassblock(_drive)+"/size").trimmed().toUInt();
+    uint availableMB = (totalSectors-startSector)/2048;
 
     /* key: partition number, value: partition information */
-    QMap<int, PartitionInfo *> partitionMap;
+    QMap<int, PartitionInfo *> partitionMap, bootPartitionMap;
 
     foreach (OsInfo *image, _images)
     {
@@ -116,7 +117,7 @@ void MultiImageWriteThread::run()
                     return;
                 }
 
-                partition->setPartitionDevice("/dev/mmcblk0p"+QByteArray::number(reqPart));
+                partition->setPartitionDevice(partdev(_drive, reqPart));
                 partitionMap.insert(reqPart, partition);
             }
 
@@ -145,11 +146,19 @@ void MultiImageWriteThread::run()
     }
 
     /* Assign logical partition numbers to partitions that did not reserve a special number */
-    int pnr;
+    int pnr, bootpnr;
+    uint offset = 0;
     if (partitionMap.isEmpty())
         pnr = 6;
     else
         pnr = qMax(partitionMap.keys().last(), 5)+1;
+
+    if (_multiDrives)
+    {
+        bootpnr = 6;
+        offset = getFileContents(sysclassblock(_bootdrive, 5)+"/start").trimmed().toUInt()
+               + getFileContents(sysclassblock(_bootdrive, 5)+"/size").trimmed().toUInt();
+    }
 
     foreach (OsInfo *image, _images)
     {
@@ -157,9 +166,29 @@ void MultiImageWriteThread::run()
         {
             if (!partition->requiresPartitionNumber())
             {
-                partitionMap.insert(pnr, partition);
-                partition->setPartitionDevice("/dev/mmcblk0p"+QByteArray::number(pnr));
-                pnr++;
+                if (_multiDrives && partition->bootable() && !partition->wantMaximised() )
+                {
+                    bootPartitionMap.insert(bootpnr, partition);
+                    partition->setPartitionDevice(partdev(_bootdrive, bootpnr));
+                    bootpnr++;
+                    offset += PARTITION_GAP;
+
+                    /* Align at 4 MiB offset */
+                    if (offset % PARTITION_ALIGNMENT != 0)
+                    {
+                            offset += PARTITION_ALIGNMENT-(offset % PARTITION_ALIGNMENT);
+                    }
+                    partition->setOffset(offset);
+                    uint partsizeSectors = partition->partitionSizeNominal() * 2048;
+                    partition->setPartitionSizeSectors(partsizeSectors);
+                    offset += partsizeSectors;
+                }
+                else
+                {
+                    partitionMap.insert(pnr, partition);
+                    partition->setPartitionDevice(partdev(_drive, pnr));
+                    pnr++;
+                }
             }
         }
     }
@@ -174,7 +203,7 @@ void MultiImageWriteThread::run()
     if (!log_before_prim.isEmpty() && log_before_prim.first()->requiresPartitionNumber() == 4)
         log_before_prim.push_back(log_before_prim.takeFirst());
 
-    int offset = startSector;
+    offset = startSector;
 
     foreach (PartitionInfo *p, log_before_prim)
     {
@@ -200,15 +229,15 @@ void MultiImageWriteThread::run()
             p->setOffset(offset);
         }
 
-        int partsizeMB = p->partitionSizeNominal();
+        uint partsizeMB = p->partitionSizeNominal();
         if ( p->wantMaximised() )
             partsizeMB += _extraSpacePerPartition;
-        int partsizeSectors = partsizeMB * 2048;
+        uint partsizeSectors = partsizeMB * 2048;
 
         if (p == log_before_prim.last())
         {
             /* Let last partition have any remaining space that we couldn't divide evenly */
-            int spaceleft = totalSectors - offset - partsizeSectors;
+            uint spaceleft = totalSectors - offset - partsizeSectors;
 
             if (spaceleft > 0 && p->wantMaximised())
             {
@@ -244,7 +273,7 @@ void MultiImageWriteThread::run()
         f.remove();
 
     emit statusUpdate(tr("Writing partition table"));
-    if (!writePartitionTable(partitionMap))
+    if (!writePartitionTable(_drive, partitionMap))
         return;
 
     /* Zero out first sector of partitions, to make sure to get rid of previous file system (label) */
@@ -252,7 +281,33 @@ void MultiImageWriteThread::run()
     foreach (PartitionInfo *p, partitionMap.values())
     {
         if (p->partitionSizeSectors())
-            QProcess::execute("/bin/dd count=1 bs=512 if=/dev/zero of="+p->partitionDevice());
+            QProcess::execute("/bin/dd count=3 bs=512 if=/dev/zero of="+p->partitionDevice());
+    }
+
+    /* Write partition table to boot drive (if using multiple drives) */
+    if (_multiDrives)
+    {
+        emit statusUpdate(tr("Writing boot partition table"));
+
+        if (!writePartitionTable(_bootdrive, bootPartitionMap))
+            return;
+
+        /* Zero out first sector of partitions, to make sure to get rid of previous file system (label) */
+        emit statusUpdate(tr("Zero'ing start of each partition"));
+        foreach (PartitionInfo *p, bootPartitionMap.values())
+        {
+            if (p->partitionSizeSectors())
+                QProcess::execute("/bin/dd count=3 bs=512 if=/dev/zero of="+p->partitionDevice());
+        }
+
+        if (QProcess::execute("mount -t ext4 "+partdev(_bootdrive, SETTINGS_PARTNR)+" /mnt2") == 0)
+        {
+            QFile f("/mnt2/installed_os.json");
+            if (f.exists())
+                f.remove();
+
+            QProcess::execute("umount /mnt2");
+        }
     }
 
     /* Install each operating system */
@@ -267,18 +322,18 @@ void MultiImageWriteThread::run()
     emit completed();
 }
 
-bool MultiImageWriteThread::writePartitionTable(const QMap<int, PartitionInfo *> &pmap)
+bool MultiImageWriteThread::writePartitionTable(const QString &drive, const QMap<int, PartitionInfo *> &pmap)
 {
     /* Write partition table using sfdisk */
 
     /* Fixed NOOBS partition */
-    int startP1 = getFileContents("/sys/class/block/mmcblk0p1/start").trimmed().toInt();
-    int sizeP1  = getFileContents("/sys/class/block/mmcblk0p1/size").trimmed().toInt();
+    uint startP1 = getFileContents(sysclassblock(drive, 1)+"/start").trimmed().toUInt();
+    uint sizeP1  = getFileContents(sysclassblock(drive, 1)+"/size").trimmed().toUInt();
     /* Fixed start of extended partition. End is not fixed, as it depends on primary partition 3 & 4 */
     int startExtended = startP1+sizeP1;
     /* Fixed settings partition */
-    int startP5 = getFileContents("/sys/class/block/mmcblk0p5/start").trimmed().toInt();
-    int sizeP5  = getFileContents("/sys/class/block/mmcblk0p5/size").trimmed().toInt();
+    uint startP5 = getFileContents(sysclassblock(drive, SETTINGS_PARTNR)+"/start").trimmed().toUInt();
+    uint sizeP5  = getFileContents(sysclassblock(drive, SETTINGS_PARTNR)+"/size").trimmed().toUInt();
 
     if (!startP1 || !sizeP1 || !startP5 || !sizeP5)
     {
@@ -292,7 +347,7 @@ bool MultiImageWriteThread::writePartitionTable(const QMap<int, PartitionInfo *>
     partitionMap.insert(1, new PartitionInfo(1, startP1, sizeP1, "0E", this)); /* FAT boot partition */
     partitionMap.insert(5, new PartitionInfo(5, startP5, sizeP5, "L", this)); /* Ext4 settings partition */
 
-    int sizeExtended = partitionMap.values().last()->endSector() - startExtended;
+    uint sizeExtended = partitionMap.values().last()->endSector() - startExtended;
     if (!partitionMap.contains(2))
     {
         partitionMap.insert(2, new PartitionInfo(2, startExtended, sizeExtended, "E", this));
@@ -328,13 +383,21 @@ bool MultiImageWriteThread::writePartitionTable(const QMap<int, PartitionInfo *>
     qDebug() << partitionTable;
 
     /* Unmount everything before modifying partition table */
-    QProcess::execute("umount /mnt");
-    QProcess::execute("umount /settings");
+    QString driveP1 = partdev(drive, 1).replace("/dev/", "");
+    if (drive == _bootdrive)
+    {
+        QProcess::execute("umount /mnt");
+        QProcess::execute("umount /settings");
+    }
+    if (QFile::exists("/tmp/media/"+driveP1))
+    {
+        QProcess::execute("umount /tmp/media/"+driveP1);
+    }
 
     /* Let sfdisk write a proper partition table */
     QProcess proc;
     proc.setProcessChannelMode(proc.MergedChannels);
-    proc.start("/sbin/sfdisk -uS /dev/mmcblk0");
+    proc.start("/sbin/sfdisk -uS --force "+drive);
     proc.write(partitionTable);
     proc.closeWriteChannel();
     proc.waitForFinished(-1);
@@ -347,8 +410,15 @@ bool MultiImageWriteThread::writePartitionTable(const QMap<int, PartitionInfo *>
     QThread::msleep(500);
 
     /* Remount */
-    QProcess::execute("mount -o ro -t vfat /dev/mmcblk0p1 /mnt");
-    QProcess::execute("mount -t ext4 /dev/mmcblk0p5 /settings");
+    if (drive == _bootdrive)
+    {
+        QProcess::execute("mount -o ro -t vfat "+partdev(drive, 1)+" /mnt");
+        QProcess::execute("mount -t ext4 "+partdev(drive, SETTINGS_PARTNR)+" /settings");
+    }
+    if (QFile::exists("/tmp/media/"+driveP1))
+    {
+        QProcess::execute("mount -o ro -t vfat /dev/"+driveP1+" /tmp/media/"+driveP1);
+    }
 
     if (proc.exitCode() != 0)
     {
@@ -388,22 +458,9 @@ bool MultiImageWriteThread::processImage(OsInfo *image)
                 return false;
             }
         }
-        if (label.size() > 15)
-        {
-            label.clear();
-        }
-        else if (!isLabelAvailable(label))
-        {
-            for (int i=0; i<10; i++)
-            {
-                if (isLabelAvailable(label+QByteArray::number(i)))
-                {
-                    label = label+QByteArray::number(i);
-                    break;
-                }
-            }
-        }
+
         QByteArray partdevice = p->partitionDevice();
+        emit newDrive(partdevice);
 
         if (fstype == "raw")
         {
@@ -463,13 +520,24 @@ bool MultiImageWriteThread::processImage(OsInfo *image)
         return false;
     }
 
+    if (QFile::exists("/mnt/firmware.override"))
+    {
+        if (::system("cp /mnt/firmware.override/* /mnt2") != 0) { }
+    }
+
     emit statusUpdate(tr("%1: Creating os_config.json").arg(os_name));
 
     QString description = getDescription(image->folder(), image->flavour());
     QVariantList vpartitions;
     foreach (PartitionInfo *p, *partitions)
     {
-        vpartitions.append(p->partitionDevice());
+        QString part = p->partitionDevice();
+        if (part.left(13) != "/dev/mmcblk0p")
+        {
+            part = getPartUUID(part);
+        }
+        vpartitions.append(part);
+
     }
     QSettings settings("/settings/noobs.conf", QSettings::IniFormat);
     int videomode = settings.value("display_mode", 0).toInt();
@@ -519,17 +587,21 @@ bool MultiImageWriteThread::processImage(OsInfo *image)
             QString nr    = QString::number(pnr);
             QString uuid  = getUUID(part);
             QString label = getLabel(part);
+            QString partuuid = getPartUUID(part);
             QString id;
             if (!label.isEmpty())
                 id = "LABEL="+label;
             else
                 id = "UUID="+uuid;
+            if (_drive != "/dev/mmcblk0")
+                part = partuuid;
 
             qDebug() << "part" << part << uuid << label;
 
             args << "part"+nr+"="+part << "id"+nr+"="+id;
             env.insert("part"+nr, part);
             env.insert("id"+nr, id);
+            env.insert("partuuid"+nr, partuuid);
             pnr++;
         }
 
@@ -563,10 +635,24 @@ bool MultiImageWriteThread::processImage(OsInfo *image)
     ventry["release_date"]= image->releaseDate();
     ventry["partitions"]  = vpartitions;
     ventry["bootable"]    = image->bootable();
+    if (!image->supportedModels().isEmpty())
+        ventry["supported_models"] = image->supportedModels();
     QString iconfilename  = image->folder()+"/"+image->flavour()+".png";
     iconfilename.replace(" ", "_");
     if (QFile::exists(iconfilename))
+    {
+        if (iconfilename.startsWith("/tmp/media/"))
+        {
+            /* Copy icon to settings folder, as USB storage may take longer to get ready on boot */
+            QDir dir;
+            QString dirname = "/settings/os/"+image->flavour().replace(" ", "_");
+            dir.mkpath(dirname);
+            QFile::copy(iconfilename, dirname+"/icon.png");
+            iconfilename = dirname+"/icon.png";
+        }
+
         ventry["icon"] = iconfilename;
+    }
     else if (QFile::exists(image->folder()+"/icon.png"))
         ventry["icon"] = image->folder()+"/icon.png";
     installed_os.append(ventry);
@@ -574,6 +660,84 @@ bool MultiImageWriteThread::processImage(OsInfo *image)
     Json::saveToFile("/settings/installed_os.json", installed_os);
 
     return true;
+}
+
+QString MultiImageWriteThread::shorten(QString example, int maxLabelLen)
+{
+    QString test;
+    if (example.size()<=maxLabelLen)
+    {
+        return(example);
+    }
+    example.replace("_","#");
+    example.replace("-","#");
+    example.replace(" ","#");
+
+    QStringList parts = example.split("#", QString::SkipEmptyParts);
+    int numParts = qMin(3, parts.count());
+    int r;
+    int len;
+    int l1,l2;
+    int rem;
+    switch (numParts)
+    {
+        case 3:
+            len=parts.last().size();
+            r=qMin((maxLabelLen-4),len);
+            rem = maxLabelLen -r-2;
+            l2 = rem/2;
+            l1 = rem-l2;
+            test= parts.first().left(l1)+"_"+parts.at(1).right(l2)+"_"+parts.last().left(r);
+            break;
+
+        case 2:
+            len=parts.last().size();
+            r=qMin(maxLabelLen-2, len);
+            test = parts.first().left(maxLabelLen-r-1) + "_" + parts.last().left(r);
+            break;
+
+        default:
+            test = parts.first();
+            test=test.left(maxLabelLen);
+            break;
+    }
+    return(test);
+}
+
+QByteArray MultiImageWriteThread::makeLabelUnique(QByteArray label, int maxLabelLen)
+{
+    if (label.size() > maxLabelLen)
+    {   //restrict to maximum size
+        label = shorten(label, maxLabelLen).toAscii();
+    }
+
+    if (!isLabelAvailable(label))
+    {
+        if (label.size() == maxLabelLen)
+        {   //Make room for extra digit
+            label = label.left(maxLabelLen-1);
+        }
+        for (int i=0; i<10; i++)
+        {
+            if (isLabelAvailable(label+QByteArray::number(i)))
+            {
+                label = label+QByteArray::number(i);
+                return(label);
+            }
+        }
+        //Let's add some more now that we can have 56 OSes on a USB installed!
+        for (char c='A'; c<='Z'; c++)
+        {
+            if (isLabelAvailable(label+c))
+            {
+                label = label+c;
+                return(label);
+            }
+        }
+        //No hope if we get to here
+        label="";
+    }
+    return (label);
 }
 
 bool MultiImageWriteThread::mkfs(const QByteArray &device, const QByteArray &fstype, const QByteArray &label, const QByteArray &mkfsopt)
@@ -585,7 +749,7 @@ bool MultiImageWriteThread::mkfs(const QByteArray &device, const QByteArray &fst
         cmd = "/sbin/mkfs.fat ";
         if (!label.isEmpty())
         {
-            cmd += "-n "+label+" ";
+            cmd += "-n "+makeLabelUnique(label, 11)+" ";
         }
     }
     else if (fstype == "ext4")
@@ -593,7 +757,7 @@ bool MultiImageWriteThread::mkfs(const QByteArray &device, const QByteArray &fst
         cmd = "/usr/sbin/mkfs.ext4 ";
         if (!label.isEmpty())
         {
-            cmd += "-L "+label+" ";
+            cmd += "-L "+makeLabelUnique(label, 16)+" ";
         }
     }
     else if (fstype == "ntfs")
@@ -601,7 +765,7 @@ bool MultiImageWriteThread::mkfs(const QByteArray &device, const QByteArray &fst
         cmd = "/sbin/mkfs.ntfs --fast ";
         if (!label.isEmpty())
         {
-            cmd += "-L "+label+" ";
+            cmd += "-L "+makeLabelUnique(label, 32)+" ";
         }
     }
 
@@ -830,9 +994,6 @@ void MultiImageWriteThread::patchConfigTxt()
 
         switch (videomode)
         {
-        case 0: /* HDMI PREFERRED */
-            dispOptions = "hdmi_force_hotplug=1\r\n";
-            break;
         case 1: /* HDMI VGA */
             dispOptions = "hdmi_ignore_edid=0xa5000080\r\nhdmi_force_hotplug=1\r\nhdmi_group=2\r\nhdmi_mode=4\r\n";
             break;
@@ -852,31 +1013,6 @@ void MultiImageWriteThread::patchConfigTxt()
 
 }
 
-QByteArray MultiImageWriteThread::getLabel(const QString part)
-{
-    QByteArray result;
-    QProcess p;
-    p.start("/sbin/blkid -s LABEL -o value "+part);
-    p.waitForFinished();
-
-    if (p.exitCode() == 0)
-        result = p.readAll().trimmed();
-
-    return result;
-}
-
-QByteArray MultiImageWriteThread::getUUID(const QString part)
-{
-    QByteArray result;
-    QProcess p;
-    p.start("/sbin/blkid -s UUID -o value "+part);
-    p.waitForFinished();
-
-    if (p.exitCode() == 0)
-        result = p.readAll().trimmed();
-
-    return result;
-}
 
 QString MultiImageWriteThread::getDescription(const QString &folder, const QString &flavour)
 {
@@ -907,3 +1043,4 @@ bool MultiImageWriteThread::isURL(const QString &s)
 {
     return s.startsWith("http:") || s.startsWith("https:");
 }
+

@@ -96,6 +96,8 @@ function select_kernelconfig {
 }
 
 
+export QT_SELECT=4
+
 cd buildroot
 
 # WARNING: don't try changing these - you'll break buildroot
@@ -122,7 +124,7 @@ for i in $*; do
 
     # Update raspberrypi/linux rpi-4.1.y HEAD version in buildroot/.config to latest
     if [ $i = "update-kernel" ]; then
-        update_github_kernel_version raspberrypi/linux rpi-4.4.y
+        update_github_kernel_version raspberrypi/linux rpi-5.10.y
     fi
 
     # Option to build just recovery without completely rebuilding both kernels
@@ -146,6 +148,12 @@ mkdir -p "$FINAL_OUTPUT_DIR/os"
 cp -r ../sdcontent/* "$FINAL_OUTPUT_DIR"
 
 if [ $SKIP_KERNEL_REBUILD -ne 1 ]; then
+    # Rebuild kernel for ARMv7l
+    select_kernelconfig armv7l
+    make linux-reconfigure
+    # copy ARMv7l kernel
+    cp "$IMAGES_DIR/zImage" "$FINAL_OUTPUT_DIR/recovery7l.img"
+
     # Rebuild kernel for ARMv7
     select_kernelconfig armv7
     make linux-reconfigure
@@ -167,19 +175,23 @@ cp "$IMAGES_DIR/rootfs.squashfs" "$FINAL_OUTPUT_DIR/recovery.rfs"
 
 # Ensure that final output dir contains files necessary to boot
 cp "$IMAGES_DIR/rpi-firmware/start.elf" "$FINAL_OUTPUT_DIR/recovery.elf"
+cp "$IMAGES_DIR/rpi-firmware/start4.elf" "$FINAL_OUTPUT_DIR/recover4.elf"
+cp "$IMAGES_DIR/rpi-firmware/fixup.dat" "$FINAL_OUTPUT_DIR/fixup_rc.dat"
+cp "$IMAGES_DIR/rpi-firmware/fixup4.dat" "$FINAL_OUTPUT_DIR/fixup4rc.dat"
+cp "$IMAGES_DIR/rpi-firmware/config.txt" "$FINAL_OUTPUT_DIR"
 cp "$IMAGES_DIR/rpi-firmware/bootcode.bin" "$FINAL_OUTPUT_DIR"
-cp -a $IMAGES_DIR/rpi-firmware/*.dtb "$IMAGES_DIR/rpi-firmware/overlays" "$FINAL_OUTPUT_DIR"
+cp -a $IMAGES_DIR/*.dtb "$IMAGES_DIR/overlays" "$FINAL_OUTPUT_DIR"
 cp "$IMAGES_DIR/cmdline.txt" "$FINAL_OUTPUT_DIR/recovery.cmdline"
 touch "$FINAL_OUTPUT_DIR/RECOVERY_FILES_DO_NOT_EDIT"
 
 # Create build-date timestamp file containing Git HEAD info for build
 BUILD_INFO="$FINAL_OUTPUT_DIR/BUILD-DATA"
 echo "Build-date: $(date +"%Y-%m-%d")" > "$BUILD_INFO"
-echo "NOOBS Version: $(git describe)" >> "$BUILD_INFO"
+echo "NOOBS Version: $(sed -n 's|.*VERSION_NUMBER.*\"\(.*\)\"|v\1|p' ../recovery/config.h)" >> "$BUILD_INFO"
 echo "NOOBS Git HEAD @ $(git rev-parse --verify HEAD)" >> "$BUILD_INFO"
 echo "rpi-userland Git master @ $(get_package_version rpi-userland)" >> "$BUILD_INFO"
 echo "rpi-firmware Git master @ $(get_package_version rpi-firmware)" >> "$BUILD_INFO"
-echo "rpi-linux Git rpi-4.1.y @ $(get_kernel_version)" >> "$BUILD_INFO"
+echo "rpi-linux Git rpi-5.10.y @ $(get_kernel_version)" >> "$BUILD_INFO"
 
 cd ..
 
